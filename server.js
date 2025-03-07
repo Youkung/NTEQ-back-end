@@ -12,12 +12,14 @@ const PORT = process.env.PORT || 8080;
 // Database configuration
 // Update database configuration to use connection pool
 const pool = mysql.createPool({
-    host: "localhost",
-    user: "root",
-    database: "ntdtb",
+    host: 'sql12.freesqldatabase.com', 
+    user: 'sql12765998',  
+    password: 'pdxlFPtSFj', 
+    database: 'sql12765998',
+    port: 3306, 
     waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
+    connectionLimit: 10, 
+    queueLimit: 0  
 });
 
 const db = pool.promise();
