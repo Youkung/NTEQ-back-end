@@ -7,6 +7,7 @@ var bodyParser = require("body-parser");
 const mysql = require("mysql2");
 const fs = require("fs");
 const path = require("path");
+
 const PORT = process.env.PORT || 8080;
 
 // Database configuration
@@ -22,9 +23,6 @@ const pool = mysql.createPool({
     queueLimit: 0  
 });
 
-const db = pool.promise();
-
-
 pool.getConnection((err, connection) => {
     if (err) {
         console.error("❌ Database connection failed:", err);
@@ -33,6 +31,8 @@ pool.getConnection((err, connection) => {
         connection.release(); // ปล่อย connection กลับไปใน pool
     }
 });
+
+const db = pool.promise();
 
 // Middleware configuration
 // Configure middleware
@@ -234,20 +234,62 @@ app.get("/api/equipement", function (req, res) {
 
 app.delete("/api/equipment/:Equipe_ID", async (req, res) => {
     const { Equipe_ID } = req.params;
+    const { deleteItems } = req.query; // Add this parameter
+    let connection;
 
     try {
-        const [equipement] = await db.query("SELECT * FROM equipement WHERE Equipe_ID = ?", [Equipe_ID]);
+        connection = await db.getConnection();
+        await connection.beginTransaction();
 
-        if (equipement.length === 0) {
-            return res.status(404).json({ message: "ไม่พบอุปกรณ์ในระบบ" });
+        // Check for existing items
+        const [items] = await connection.query(
+            "SELECT COUNT(*) as count FROM item WHERE Equipe_ID = ?",
+            [Equipe_ID]
+        );
+
+        if (items[0].count > 0 && !deleteItems) {
+            await connection.rollback();
+            return res.status(409).json({
+                message: "มีอุปกรณ์ย่อยอยู่ในระบบ",
+                hasItems: true,
+                itemCount: items[0].count
+            });
         }
 
-        await db.query("DELETE FROM equipement WHERE Equipe_ID = ?", [Equipe_ID]);
+        // If deleteItems is true or no items exist, proceed with deletion
+        if (deleteItems === 'true') {
+            // First delete from item_history
+            await connection.query(
+                "DELETE ih FROM item_history ih INNER JOIN item i ON ih.Item_ID = i.Item_ID WHERE i.Equipe_ID = ?",
+                [Equipe_ID]
+            );
 
-        res.status(200).json({ message: "ลบอุปกรณ์สำเร็จ" });
+            // Then delete items
+            await connection.query(
+                "DELETE FROM item WHERE Equipe_ID = ?",
+                [Equipe_ID]
+            );
+        }
+
+        // Finally delete the equipment
+        await connection.query(
+            "DELETE FROM equipement WHERE Equipe_ID = ?",
+            [Equipe_ID]
+        );
+
+        await connection.commit();
+        res.status(200).json({ 
+            message: "ลบอุปกรณ์สำเร็จ"
+        });
+
     } catch (error) {
+        if (connection) await connection.rollback();
         console.error("Error deleting equipment:", error);
-        res.status(500).json({ message: "เกิดข้อผิดพลาดในการลบอุปกรณ์" });
+        res.status(500).json({ 
+            message: "เกิดข้อผิดพลาดในการลบอุปกรณ์"
+        });
+    } finally {
+        if (connection) connection.release();
     }
 });
 
@@ -1292,7 +1334,7 @@ app.get("/api/objects", function (req, res) {
 // ...existing room routes...
 
 app.listen(PORT, function () {
-    console.log(`Server is running on port ${PORT} `);
+    console.log(`Server is running on port ${PORT}`);
 });
 
 app.get("/api/mynotes", function (req, res) {
